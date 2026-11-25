@@ -1,0 +1,1 @@
+export default { content: ['./index.html', './src/**/*.{ts,tsx}'], theme: { extend: { colors: { canvas: '#0b0d11', panel: '#111419', border: '#252a32', lime: '#c7f36b', muted: '#858c98' }, fontFamily: { sans: ['DM Sans', 'sans-serif'], display: ['Manrope', 'sans-serif'], mono: ['DM Mono', 'monospace'] } } }, plugins: [] }
