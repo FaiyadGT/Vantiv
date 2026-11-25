@@ -19,6 +19,7 @@ For frontend-only work, run `npm install` then `npm run dev`. Start the API and 
 ## Current foundation
 
 - Responsive market intelligence dashboard with overview, watchlist, market pulse, insight, and agent activity panels.
+- Learn area with guided lessons on stocks, ETFs, trading mechanics, risk, company filings, and financial statements. Lesson completion is saved in the current browser; lessons link to SEC/Investor.gov and FINRA primary resources.
 - Watchlist create, list, and delete API backed by PostgreSQL.
 - Health endpoint reports API, database, and Redis availability.
 - Docker Compose provisions the web app, FastAPI, PostgreSQL, and Redis.
