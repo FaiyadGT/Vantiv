@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, ArrowDownRight, ArrowUpRight, Bell, BookOpen, Bookmark, Bot, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, ExternalLink, FileText, LayoutDashboard, Menu, MessageSquareText, Moon, Plus, Search, Settings2, ShieldAlert, Sparkles, Sun, TrendingUp, X } from 'lucide-react'
+import { additionalQuizQuestions, type QuizDifficulty, type QuizQuestion } from './quizQuestions'
 import './learn.css'
 import './theme.css'
 
@@ -110,6 +111,8 @@ const learningPaths = [
   { id: 'trading', name: 'Trading concepts', note: 'Orders, liquidity & risk', icon: TrendingUp },
   { id: 'research', name: 'Company research', note: 'Read the story behind a stock', icon: Search },
 ]
+const difficultyLabels: Record<QuizDifficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
+const difficultyOrder: QuizDifficulty[] = ['easy', 'medium', 'hard']
 
 const lessons: Lesson[] = [
   { id: 'stock-basics', path: 'investing', title: 'Stocks: owning a piece of a company', minutes: 6, level: 'Beginner', description: 'Learn what a share represents and why stock prices move.', sections: [
@@ -161,8 +164,6 @@ const lessons: Lesson[] = [
   ], takeaways: ['Verify important claims against original documents.', 'Check publication dates and reporting periods.', 'Treat commentary as interpretation, not confirmed fact.'], sources: [{ label: 'SEC EDGAR company filings', url: 'https://www.sec.gov/edgar/search/' }] },
 ]
 
-type QuizQuestion = { prompt: string; options: string[]; answer: number; explanation: string }
-
 const quizBank: Record<string, QuizQuestion[]> = {
   'stock-basics': [
     { prompt: 'What does a share of common stock represent?', options: ['A small ownership interest in a company', 'A guaranteed payment from a company', 'A loan that must be repaid on a set date'], answer: 0, explanation: 'Common stock represents an ownership interest. Dividends and gains are not guaranteed.' },
@@ -206,6 +207,10 @@ const quizBank: Record<string, QuizQuestion[]> = {
   ],
 }
 
+Object.entries(additionalQuizQuestions).forEach(([lessonId, questions]) => {
+  quizBank[lessonId] = [...(quizBank[lessonId] || []), ...questions]
+})
+
 function SettingsPanel({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThemeChange: (theme: 'light' | 'dark') => void }) {
   return <div className="settings-page">
     <div className="settings-heading"><div className="learn-eyebrow"><Settings2 size={13}/> PREFERENCES</div><h1>Settings</h1><p>Make VANTIV feel right for you.</p></div>
@@ -217,22 +222,26 @@ function LearnCenter() {
   const [path, setPath] = useState('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState('stock-basics')
-  const [quizSelections, setQuizSelections] = useState<Record<string, number[]>>({})
-  const [quizChecks, setQuizChecks] = useState<Record<string, boolean[]>>({})
+  const [quizDifficulty, setQuizDifficulty] = useState<QuizDifficulty>('easy')
+  const [quizSelections, setQuizSelections] = useState<Record<string, Record<string, number>>>({})
+  const [quizChecks, setQuizChecks] = useState<Record<string, Record<string, boolean>>>({})
   const [completed, setCompleted] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('vantiv-learning-completed') || '[]') as string[] } catch { return [] }
   })
   const filteredLessons = lessons.filter((lesson) => (path === 'all' || lesson.path === path) && `${lesson.title} ${lesson.description} ${lesson.path}`.toLowerCase().includes(query.toLowerCase()))
   const selectedLesson = filteredLessons.find((lesson) => lesson.id === selectedId) || filteredLessons[0]
   const selectedPath = learningPaths.find((item) => item.id === path)?.name || 'All topics'
-  const questions = selectedLesson ? (quizBank[selectedLesson.id] || []).map((question) => {
+  const allQuestions = selectedLesson ? (quizBank[selectedLesson.id] || []).map((question) => {
     const shift = Array.from(question.prompt).reduce((sum, character) => sum + character.charCodeAt(0), 0) % question.options.length
-    return { ...question, options: [...question.options.slice(shift), ...question.options.slice(0, shift)], answer: (question.answer - shift + question.options.length) % question.options.length }
+    return { ...question, difficulty: question.difficulty || 'easy', options: [...question.options.slice(shift), ...question.options.slice(0, shift)], answer: (question.answer - shift + question.options.length) % question.options.length }
   }) : []
-  const answers = selectedLesson ? quizSelections[selectedLesson.id] || [] : []
-  const checks = selectedLesson ? quizChecks[selectedLesson.id] || [] : []
-  const correctCount = questions.filter((question, index) => checks[index] && answers[index] === question.answer).length
-  const quizPassed = questions.length > 0 && correctCount === questions.length
+  const questions = allQuestions.filter((question) => question.difficulty === quizDifficulty)
+  const answers = selectedLesson ? quizSelections[selectedLesson.id] || {} : {}
+  const checks = selectedLesson ? quizChecks[selectedLesson.id] || {} : {}
+  const correctCount = questions.filter((question) => checks[question.prompt] && answers[question.prompt] === question.answer).length
+  const allCorrectCount = allQuestions.filter((question) => checks[question.prompt] && answers[question.prompt] === question.answer).length
+  const difficultyPassed = questions.length > 0 && correctCount === questions.length
+  const quizPassed = allQuestions.length > 0 && allQuestions.every((question) => checks[question.prompt] && answers[question.prompt] === question.answer)
   function markComplete() {
     if (!selectedLesson || !quizPassed || completed.includes(selectedLesson.id)) return
     const updated = [...completed, selectedLesson.id]
@@ -241,25 +250,26 @@ function LearnCenter() {
   }
   function selectAnswer(questionIndex: number, optionIndex: number) {
     if (!selectedLesson) return
+    const question = questions[questionIndex]
+    if (!question) return
     const id = selectedLesson.id
-    if (quizChecks[id]?.[questionIndex] && quizSelections[id]?.[questionIndex] === questions[questionIndex]?.answer) return
+    if (quizChecks[id]?.[question.prompt] && quizSelections[id]?.[question.prompt] === question.answer) return
     setQuizSelections((current) => {
-      const next = [...(current[id] || Array(questions.length).fill(-1))]
-      next[questionIndex] = optionIndex
+      const next = { ...(current[id] || {}), [question.prompt]: optionIndex }
       return { ...current, [id]: next }
     })
     setQuizChecks((current) => {
-      const next = [...(current[id] || Array(questions.length).fill(false))]
-      next[questionIndex] = false
+      const next = { ...(current[id] || {}), [question.prompt]: false }
       return { ...current, [id]: next }
     })
   }
   function checkAnswer(questionIndex: number) {
-    if (!selectedLesson || answers[questionIndex] === undefined || answers[questionIndex] < 0) return
+    if (!selectedLesson) return
+    const question = questions[questionIndex]
+    if (!question || answers[question.prompt] === undefined || answers[question.prompt] < 0) return
     const id = selectedLesson.id
     setQuizChecks((current) => {
-      const next = [...(current[id] || Array(questions.length).fill(false))]
-      next[questionIndex] = true
+      const next = { ...(current[id] || {}), [question.prompt]: true }
       return { ...current, [id]: next }
     })
   }
@@ -274,7 +284,7 @@ function LearnCenter() {
     <div className="learn-tools"><div className="learn-section-label"><span>01</span> YOUR LEARNING PATH</div><label className="learn-search"><Search size={15}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search lessons, topics, concepts"/><kbd>âŒ˜ K</kbd></label></div>
     <div className="learning-path-grid">{learningPaths.slice(1).map(({ id, name, note, icon: Icon }, index) => <button key={id} className={`learning-path-card ${path === id ? 'path-active' : ''}`} onClick={() => choosePath(id)}><span className={`path-icon path-icon-${index}`}><Icon size={16}/></span><span className="path-card-copy"><b>{name}</b><small>{note}</small></span><span className="path-count">{lessons.filter((lesson) => lesson.path === id).length} lessons</span><ChevronRight size={14} className="path-arrow"/></button>)}</div>
     <div className="learn-main-grid"><section className="lesson-list-panel"><div className="lesson-list-head"><div><div className="learn-section-label"><span>02</span> LESSON LIBRARY</div><h2>{selectedPath}</h2></div><span className="lesson-total">{filteredLessons.length} LESSONS</span></div><div className="lesson-list">{filteredLessons.map((lesson, index) => <button key={lesson.id} className={`lesson-row ${selectedLesson?.id === lesson.id ? 'lesson-selected' : ''}`} onClick={() => setSelectedId(lesson.id)}><span className={`lesson-number ${completed.includes(lesson.id) ? 'lesson-done' : ''}`}>{completed.includes(lesson.id) ? <Check size={13}/> : String(index + 1).padStart(2, '0')}</span><span className="lesson-row-copy"><b>{lesson.title}</b><small>{lesson.description}</small><span className="lesson-meta"><span>{lesson.level}</span><i/> <Clock3 size={11}/> {lesson.minutes} min</span></span><ChevronRight className="lesson-chevron" size={15}/></button>)}{filteredLessons.length === 0 && <div className="learn-empty">No lessons match that search. Try another topic.</div>}</div><div className="learning-note"><ShieldAlert size={13}/> Education only. Lessons do not provide personalized investment recommendations.</div></section>
-      <section className="lesson-detail-panel">{selectedLesson ? <><div className="lesson-detail-top"><span className="lesson-kicker">{selectedPath.toUpperCase()} <i>Â·</i> {selectedLesson.level.toUpperCase()}</span><span className="lesson-duration"><Clock3 size={12}/> {selectedLesson.minutes} MIN READ</span></div><h2>{selectedLesson.title}</h2><p className="lesson-summary">{selectedLesson.description}</p><div className="lesson-rule"/>{selectedLesson.sections.map((section, index) => <article className="lesson-section" key={section.heading}><div className="lesson-section-num">0{index + 1}</div><div><h3>{section.heading}</h3><p>{section.body}</p></div></article>)}<div className="key-takeaways"><div className="takeaway-title"><Sparkles size={13}/> KEY TAKEAWAYS</div>{selectedLesson.takeaways.map((takeaway) => <div className="takeaway-row" key={takeaway}><Check size={13}/><span>{takeaway}</span></div>)}</div><div className="quiz-module"><div className="quiz-heading"><div><span>03 / ACTIVE RECALL</span><h3>Quick knowledge check</h3></div><span className="quiz-score">{correctCount} / {questions.length} CORRECT</span></div><p className="quiz-intro">Choose an answer, then check it. Missed one? Review the explanation and try again.</p>{questions.map((question, questionIndex) => { const choice = answers[questionIndex]; const checked = Boolean(checks[questionIndex]); const right = checked && choice === question.answer; return <article className="quiz-question" key={question.prompt}><div className="quiz-question-title"><span>{String(questionIndex + 1).padStart(2, '0')}</span><b>{question.prompt}</b></div><div className="quiz-options">{question.options.map((option, optionIndex) => <button type="button" key={option} className={`quiz-option ${choice === optionIndex ? 'quiz-option-selected' : ''} ${checked && optionIndex === question.answer ? 'quiz-option-correct' : ''} ${checked && choice === optionIndex && !right ? 'quiz-option-wrong' : ''}`} onClick={() => selectAnswer(questionIndex, optionIndex)}>{option}</button>)}</div>{checked && <div className={`quiz-feedback ${right ? 'feedback-correct' : 'feedback-try'}`}><b>{right ? 'Correct.' : 'Not quite.'}</b> {question.explanation}{!right && ' Select another answer to retry.'}</div>}<button type="button" className="quiz-check-button" disabled={choice === undefined || choice < 0 || checked} onClick={() => checkAnswer(questionIndex)}>{right ? 'Correct' : checked ? 'Choose a new answer' : 'Check answer'}</button></article>})}<div className={`quiz-gate ${quizPassed ? 'quiz-gate-passed' : ''}`}>{quizPassed ? 'Great work. You passed this lesson’s knowledge check.' : `Answer all ${questions.length} questions correctly to complete this lesson. ${correctCount} correct so far.`}</div></div><div className="lesson-sources"><span>LEARN MORE FROM PRIMARY SOURCES</span>{selectedLesson.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}>{source.label}<ExternalLink size={12}/></a>)}</div><div className="lesson-complete-row"><span>{completed.includes(selectedLesson.id) ? 'Lesson complete.' : quizPassed ? 'Knowledge check passed. Ready to finish?' : `Pass the quiz to finish (${correctCount}/${questions.length}).`}</span><button className={completed.includes(selectedLesson.id) ? 'complete-button is-complete' : 'complete-button'} onClick={markComplete} disabled={completed.includes(selectedLesson.id) || !quizPassed}><Check size={14}/>{completed.includes(selectedLesson.id) ? 'Completed' : quizPassed ? 'Complete lesson' : 'Quiz locked'}</button></div></> : <div className="learn-empty">Choose a lesson to get started.</div>}</section></div>
+      <section className="lesson-detail-panel">{selectedLesson ? <><div className="lesson-detail-top"><span className="lesson-kicker">{selectedPath.toUpperCase()} <i>Â·</i> {selectedLesson.level.toUpperCase()}</span><span className="lesson-duration"><Clock3 size={12}/> {selectedLesson.minutes} MIN READ</span></div><h2>{selectedLesson.title}</h2><p className="lesson-summary">{selectedLesson.description}</p><div className="lesson-rule"/>{selectedLesson.sections.map((section, index) => <article className="lesson-section" key={section.heading}><div className="lesson-section-num">0{index + 1}</div><div><h3>{section.heading}</h3><p>{section.body}</p></div></article>)}<div className="key-takeaways"><div className="takeaway-title"><Sparkles size={13}/> KEY TAKEAWAYS</div>{selectedLesson.takeaways.map((takeaway) => <div className="takeaway-row" key={takeaway}><Check size={13}/><span>{takeaway}</span></div>)}</div><div className="quiz-module"><div className="quiz-heading"><div><span>03 / ACTIVE RECALL</span><h3>Quick knowledge check ({allQuestions.length} questions)</h3></div><span className="quiz-score">{correctCount} / {questions.length} {difficultyLabels[quizDifficulty].toUpperCase()} CORRECT</span></div><p className="quiz-intro">Choose a difficulty to practice. Pass all three levels to complete the lesson.</p><div className="quiz-difficulty-picker" role="group" aria-label="Quiz difficulty">{difficultyOrder.map((difficulty) => { const tierQuestions = allQuestions.filter((question) => question.difficulty === difficulty); const tierCorrect = tierQuestions.filter((question) => checks[question.prompt] && answers[question.prompt] === question.answer).length; const tierPassed = tierQuestions.length > 0 && tierCorrect === tierQuestions.length; return <button type="button" key={difficulty} className={quizDifficulty === difficulty ? 'quiz-difficulty-choice quiz-difficulty-active' : 'quiz-difficulty-choice'} aria-pressed={quizDifficulty === difficulty} onClick={() => setQuizDifficulty(difficulty)}><span>{difficultyLabels[difficulty]}</span><small>{tierPassed ? 'Passed' : tierCorrect + ' / ' + tierQuestions.length}</small></button> })}</div>{questions.map((question, questionIndex) => { const choice = answers[question.prompt]; const checked = Boolean(checks[question.prompt]); const right = checked && choice === question.answer; return <article className="quiz-question" key={question.prompt}><div className="quiz-question-title"><span>{String(questionIndex + 1).padStart(2, '0')}</span><b>{question.prompt}</b></div><div className="quiz-options">{question.options.map((option, optionIndex) => <button type="button" key={option} className={'quiz-option ' + (choice === optionIndex ? 'quiz-option-selected ' : '') + (checked && optionIndex === question.answer ? 'quiz-option-correct ' : '') + (checked && choice === optionIndex && !right ? 'quiz-option-wrong' : '')} onClick={() => selectAnswer(questionIndex, optionIndex)}>{option}</button>)}</div>{checked && <div className={right ? 'quiz-feedback feedback-correct' : 'quiz-feedback feedback-try'}><b>{right ? 'Correct.' : 'Not quite.'}</b> {question.explanation}{!right && ' Select another answer to retry.'}</div>}<button type="button" className="quiz-check-button" disabled={choice === undefined || choice < 0 || checked} onClick={() => checkAnswer(questionIndex)}>{right ? 'Correct' : checked ? 'Choose a new answer' : 'Check answer'}</button></article>})}<div className={quizPassed ? 'quiz-gate quiz-gate-passed' : 'quiz-gate'}>{quizPassed ? 'Great work. You passed every difficulty level in this lesson.' : difficultyPassed ? 'You passed this level. Choose the next difficulty to keep going.' : 'Answer all ' + questions.length + ' ' + difficultyLabels[quizDifficulty].toLowerCase() + ' questions correctly. ' + correctCount + ' correct so far.'}</div></div><div className="lesson-sources"><span>LEARN MORE FROM PRIMARY SOURCES</span>{selectedLesson.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}>{source.label}<ExternalLink size={12}/></a>)}</div><div className="lesson-complete-row"><span>{completed.includes(selectedLesson.id) ? 'Lesson complete.' : quizPassed ? 'Knowledge check passed. Ready to finish?' : `Pass all difficulty levels to finish (${allCorrectCount}/${allQuestions.length}).`}</span><button className={completed.includes(selectedLesson.id) ? 'complete-button is-complete' : 'complete-button'} onClick={markComplete} disabled={completed.includes(selectedLesson.id) || !quizPassed}><Check size={14}/>{completed.includes(selectedLesson.id) ? 'Completed' : quizPassed ? 'Complete lesson' : 'Quiz locked'}</button></div></> : <div className="learn-empty">Choose a lesson to get started.</div>}</section></div>
     <div className="learn-disclaimer">VANTIV Learn is for general education. It is not financial, tax, or investment advice. Investing and trading involve risk, including possible loss of principal. <a href="https://www.investor.gov/" target="_blank" rel="noreferrer">Investor.gov <ExternalLink size={10}/></a></div>
   </div>
 }
